@@ -1,97 +1,124 @@
 # streamlit_app.py
 import streamlit as st
-# import os
-# from dotenv import load_dotenv
-# # from places_api import geocode_address, search_and_process
-# from datetime import datetime
+from machine_learning import run_analysis
+import pandas as pd
 
-# load_dotenv()
-
-# API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
-# if API_KEY:
-#     st.success("API_KEY loaded")
-# else:
-#     st.error("API_KEY not found; please check your .env file and ensure GOOGLE_PLACES_API_KEY is set")
-
-st.set_page_config(page_title="FocusPlaces", layout="wide")
-st.title("FocusPlaces")
+st.set_page_config(page_title="CMPSC 445 - Project 2", layout="wide")
+st.title("CMPSC 445 - Project 2: Museum Analysis Dashboard")
 
 st.markdown(
     """
     <div style="margin-top:-8px; margin-bottom:18px;">
       <p style="font-size:18px; color:#6b7280; margin:0; max-width:1200px;">
-        Start your search for the best nearby study spots, ranked from real user reviews to help you focus.
+        By Noam Abraham, Laurence Orji, and Matthew Wybranski. This Streamlit app helps users view analysis of PA museums based on sentiment analysis, ratings, and clustering.
+      </p>
+      <p style="font-size:18px; color:#6b7280; margin:0; max-width:1200px;">
+        To learn more about this project and the code, check out our github <a href="https://github.com/MWybranski/CMPSC445-Project2" target="_blank">here</a>
       </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# Use a full-width container for controls with two side-by-side containers
-# We create two container blocks and place them inside a horizontal layout using columns.
-# Give them generous relative widths and add spacing via an empty column in-between.
-left_container, spacer, right_container = st.columns([1.15, 0.05, 0.95])
+# Cache the analysis to avoid rerunning it on every page load
+@st.cache_data
+def load_analysis_results():
+    """Load and cache the analysis results."""
+    return run_analysis()
 
-with left_container:
-    st.header("Search parameters")
-    # Wrap controls in a container to keep them grouped
-    with st.container():
-        queries_text = st.text_area(
-            "Search queries (comma separated)",
-            value="coffee shop, library, co-working space",
-            height=160,
+# Load results
+with st.spinner("Loading analysis results..."):
+    results = load_analysis_results()
+
+# Extract results
+working_data = results['working_data']
+museum_ranking = results['museum_ranking']
+top_10_museums = results['top_10_museums']
+cluster_dict = results['cluster_dict']
+clustering_plot = results['clustering_plot']
+correlation_plot = results['correlation_plot']
+least_correlated_museums = results['least_correlated_museums']
+cluster_summary = results['cluster_summary']
+
+# Create tabs for different views
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Top Museums", "Clustering Analysis", "Sentiment Correlation", "Cluster Details", "Raw Data"]
+)
+
+with tab1:
+    st.header("Top 10 Museums by Weighted Score")
+    st.dataframe(
+        top_10_museums.reset_index(drop=True),
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Complete Museum Rankings")
+        st.dataframe(
+            museum_ranking.sort_values('weighted_score', ascending=False).reset_index(drop=True),
+            use_container_width=True,
+            hide_index=True
         )
-        st.caption("If left blank, default queries (coffee shop, library, co‑working space) will be used.")
-        location_input = st.text_input("Location (address) — optional", value="")
-        st.caption("If left empty, FocusPlaces will attempt to use current location if available.")
-        radius_miles = st.number_input(
-            "Radius (miles)",
-            min_value=0.1,
-            max_value=50.0,
-            value=7.5,
-            step=0.1,
-            format="%.1f",
-        )
-        radius = int(radius_miles * 1609.344)
 
-with right_container:
-    # Put related numeric settings in their own visual group
-    st.header("Advanced options")
-    with st.container():
-        recent_days = st.number_input(
-            "Recent time window (days)",
-            min_value=30,
-            max_value=3650,
-            value=900,
-        )
-        st.caption("Only reviews from the last N days are counted as 'recent' when computing recent-review statistics and the focus score.")
-        min_recent = st.number_input(
-            "Minimum recent reviews (warning threshold)",
-            min_value=1,
-            max_value=20,
-            value=3,
-        )
-        st.caption("If a place has fewer than this many recent reviews, results may be less reliable.")
-        max_candidates = st.number_input("Max candidates per query", min_value=1, max_value=50, value=5)
-        max_reviews_per_place = st.number_input("Max reviews per place to fetch", min_value=1, max_value=20, value=5)
+with tab2:
+    st.header("Museum Clustering Visualization")
+    st.markdown("Museums grouped into 4 clusters using K-Means, visualized with PCA dimension reduction.")
+    st.pyplot(clustering_plot, use_container_width=True)
+    
+    st.subheader("Cluster Summary Statistics")
+    st.dataframe(cluster_summary, use_container_width=True)
 
-# Action row below the paired containers spanning full width
-action_cols = st.columns([1, 4, 1])
-with action_cols[1]:
-    run = st.button("Run search", use_container_width=True)
-    st.markdown("<small style='color:#6b7280;'>Tip: adjust parameters to broaden or narrow your results.</small>", unsafe_allow_html=True)
+with tab3:
+    st.header("Sentiment Analysis vs. User Ratings")
+    st.markdown("Correlation between museum average ratings and review sentiment polarity.")
+    st.pyplot(correlation_plot, use_container_width=True)
+    
+    st.subheader("Museums with Lowest Sentiment-Rating Alignment")
+    st.markdown("These museums have the biggest discrepancy between their ratings and the sentiment of their reviews.")
+    st.dataframe(
+        least_correlated_museums[['name', 'museum_average_rating', 'average_polarity', 'residuals']].head(10).reset_index(drop=True),
+        use_container_width=True,
+        hide_index=True
+    )
 
-# Results area uses full width below controls
-results_area = st.container()
+with tab4:
+    st.header("Cluster Characteristics")
+    st.markdown("Top categories in each cluster:")
+    
+    for cluster_id in sorted(cluster_dict.keys()):
+        with st.expander(f"Cluster {cluster_id}", expanded=True):
+            categories = cluster_dict[cluster_id]
+            st.write("Top 10 categories in this cluster:")
+            st.dataframe(
+                pd.DataFrame({"Category": categories.index, "Count": categories.values}).reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True
+            )
 
-queries = [q.strip() for q in queries_text.split(",") if q.strip()]
-if not queries:
-    queries = ["coffee shop", "library", "co-working space"]
+with tab5:
+    st.header("Raw Data Browser")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        show_all_reviews = st.checkbox("Show all review data", value=False)
+        if show_all_reviews:
+            st.subheader("All Reviews with Sentiment Analysis")
+            st.dataframe(
+                working_data[['name', 'review_text', 'polarity', 'subjectivity', 'museum_average_rating', 'average_polarity']].reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True
+            )
+    
+    with col2:
+        show_summary = st.checkbox("Show museum summary data", value=False)
+        if show_summary:
+            st.subheader("Museum Summary")
+            st.dataframe(
+                working_data[['name', 'museum_average_rating', 'average_polarity', 'review_rating']].drop_duplicates(subset=['name']).reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True
+            )
 
-if run:
-    with st.spinner("Search functionality is disabled."):
-        st.info("This demo preserves the app layout and controls, but no Google API calls are made.")
-        st.write("The search button was pressed, but actual place lookup and review processing are disabled.")
-
-    with results_area:
-        st.info("No results are available because the Google Places API integration has been removed.")
+st.success("Analysis loaded successfully! Use the tabs above to explore different views.")
